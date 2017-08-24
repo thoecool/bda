@@ -46,10 +46,10 @@ type BDA struct {
 
 //AwsConfig is a struct for aws user credential configuration
 type AwsConfig struct {
-	awsID     string
-	awsKey    string
-	awsRegion string
-	dbConfig  map[string]DbConfig
+	AwsID     string
+	AwsKey    string
+	AwsRegion string
+	DbConfig  map[string]DbConfig
 }
 
 //QueryExecID this is query for
@@ -74,9 +74,9 @@ func NewSession(awsID, awsKey, awsRegion string) (*session.Session, error) {
 
 //Init will initialize all services that is needed for big data analysis
 func (bda *BDA) Init(conf AwsConfig) {
-	bda.session, _ = NewSession(conf.awsID, conf.awsKey, conf.awsRegion)
+	bda.session, _ = NewSession(conf.AwsID, conf.AwsKey, conf.AwsRegion)
 	bda.svcS3 = s3.New(bda.session)
-	bda.svcAthena = athena.New(bda.session, aws.NewConfig().WithRegion(conf.awsRegion))
+	bda.svcAthena = athena.New(bda.session, aws.NewConfig().WithRegion(conf.AwsRegion))
 	bda.uploader = s3manager.NewUploader(bda.session)
 	bda.downloader = s3manager.NewDownloader(bda.session)
 	bda.awsConfig = &conf
@@ -165,14 +165,14 @@ func (bda *BDA) SaveS3ObjectFromString(bucket, filename, body string) (int, erro
 //PrepareQuery this function will insert query to be prepared on athena, query that is allowed is limited,
 //please refer to athena documentation
 func (bda *BDA) PrepareQuery(dbName, query string) (*string, error) {
-	if len(bda.awsConfig.dbConfig) == 0 {
+	if len(bda.awsConfig.DbConfig) == 0 {
 		return nil, errors.New("db config is not available")
 	}
 	queryExecutionContext := &athena.QueryExecutionContext{
-		Database: aws.String(bda.awsConfig.dbConfig[dbName].Name),
+		Database: aws.String(bda.awsConfig.DbConfig[dbName].Name),
 	}
 	resultConfiguration := &athena.ResultConfiguration{
-		OutputLocation: aws.String(bda.awsConfig.dbConfig[dbName].ResultBulk),
+		OutputLocation: aws.String(bda.awsConfig.DbConfig[dbName].ResultBulk),
 	}
 	startQueryExectionRequest := &athena.StartQueryExecutionInput{
 		QueryString:           aws.String(query),
@@ -192,7 +192,7 @@ func (bda *BDA) ExecuteQuery(qeID QueryExecID, args ...interface{}) ([]map[strin
 	if err != nil {
 		return nil, err
 	}
-	result, err := processResultRows(qeID, args...)
+	result, err := processResultRows(bda.svcAthena, qeID, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -224,11 +224,11 @@ func WaitForQueryToComplete(svcAth *athena.Athena, queryExecutionID QueryExecID)
 	return nil
 }
 
-func processResultRows(qeID QueryExecID, args ...interface{}) ([]map[string]interface{}, error) {
+func processResultRows(svcAthn *athena.Athena, qeID QueryExecID, args ...interface{}) ([]map[string]interface{}, error) {
 	getQueryResultsRequest := &athena.GetQueryResultsInput{
 		QueryExecutionId: qeID,
 	}
-	getQueryResultsResult, err := bda.svcAthena.GetQueryResults(getQueryResultsRequest)
+	getQueryResultsResult, err := svcAthn.GetQueryResults(getQueryResultsRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +253,7 @@ func processResultRows(qeID QueryExecID, args ...interface{}) ([]map[string]inte
 		if getQueryResultsResult.NextToken == nil {
 			return queryResults, nil
 		}
-		getQueryResultsResult, err = bda.svcAthena.GetQueryResults(getQueryResultsRequest.SetNextToken(*getQueryResultsResult.NextToken))
+		getQueryResultsResult, err = svcAthn.GetQueryResults(getQueryResultsRequest.SetNextToken(*getQueryResultsResult.NextToken))
 		if err != nil {
 			return queryResults, err
 		}
